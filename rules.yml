@@ -1,0 +1,8 @@
+# This file is used to configure the alert rules using PromQL. A basic alert rule is triggered when an instance is down for at least 1 minute.
+
+groups:
+  - name: example
+    rules:
+    - alert: InstanceDown
+      expr: up == 0
+      for: 1m

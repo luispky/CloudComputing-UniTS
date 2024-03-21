@@ -1,0 +1,128 @@
+version: '3.8'
+
+services:
+  db: # PostgreSQL database service 
+    image: postgres
+    container_name: nextcloud_db
+    restart: always
+    volumes:
+      - ./db:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=nextcloud
+      - POSTGRES_USER=nextcloud
+      - POSTGRES_PASSWORD=nextcloud
+    networks:
+      - nextcloud_network
+
+  redis: # Redis service for caching
+    image: redis:latest 
+    container_name: nextcloud_cache 
+    restart: always 
+    command: redis-server --requirepass password
+    networks:
+      - nextcloud_network
+
+  nextcloud: # Nextcloud service for file storage 
+    image: nextcloud
+    container_name: nextcloud
+    restart: always
+    ports:
+      - "8080:80"
+    volumes:
+      - nextcloud:/var/www/html
+      - ./custom-apache.conf:/etc/apache2/conf-available/custom-apache.conf # Custom Apache configuration for IP recognition
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_DB=nextcloud
+      - POSTGRES_USER=nextcloud
+      - POSTGRES_PASSWORD=nextcloud
+      - REDIS_HOST=redis
+      - REDIS_HOST_PASSWORD=password
+      - REDIS_PORT=6379
+      - NEXTCLOUD_ADMIN_USER=admin
+      - NEXTCLOUD_ADMIN_PASSWORD=password
+    depends_on:
+      - db
+      - redis
+    networks:
+      - nextcloud_network
+
+  cron: # Cron service for running periodic tasks, e.g. trash bin cleanup
+    image: nextcloud
+    restart: always
+    volumes:
+      - nextcloud:/var/www/html
+    entrypoint: /cron.sh
+    depends_on:
+      - db
+      - redis
+    networks:
+      - nextcloud_network
+  
+  prometheus: # Prometheus service for monitoring
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./rules.yml:/etc/prometheus/rules.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    ports:
+      - 9090:9090
+    networks:
+      - nextcloud_network
+
+  alertmanager: # Alertmanager service for sending alerts
+    image: prom/alertmanager:latest
+    container_name: alertmanager
+    restart: unless-stopped
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+    ports:
+      - 9093:9093
+    networks:
+      - nextcloud_network
+
+  grafana: # Grafana service for visualization
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    ports:
+      - 3000:3000
+    networks:
+      - nextcloud_network
+
+  node-exporter: # Node Exporter service for monitoring
+    image: xperimental/nextcloud-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    environment:
+      - NEXTCLOUD_SERVER=http://nextcloud
+      - NEXTCLOUD_USERNAME=admin
+      - NEXTCLOUD_PASSWORD=admin
+    ports:
+      - 9205:9205
+    networks:
+      - nextcloud_network
+
+volumes:
+  db:
+  nextcloud:
+  prometheus_data:
+  grafana_data:
+
+networks: # Network for communication between services. Nextcloud and Locust are connected to the same network.
+  nextcloud_network:
+    external: true
